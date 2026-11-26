@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HOWTO Chat
 
-## Getting Started
+Ask questions about the team's HOWTO documents. Documents are split into chunks, embedded with `bge-m3` (multilingual, via Ollama) and stored in a local
+vector database (LanceDB). Each question retrieves the closest chunks and a local LLM served by Ollama answers from
+them with citations. Everything runs on your machine: no API keys.
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+howto/ ──► npm run ingest ──► chunks ──► embeddings (Ollama bge-m3) ──► LanceDB (./data)
+                                                                                              │
+Chat UI ──► /api/chat ──► embed question ──► top-6 chunks ──► Ollama (qwen3.5:4b) ──► streamed answer + sources
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+ollama pull qwen3.5:4b       # chat model, any Ollama chat model works (OLLAMA_MODEL)
+ollama pull bge-m3           # embedding model (OLLAMA_EMBED_MODEL)
+cp .env.example .env.local
+npm run ingest               # (re)build the vector DB from HOWTO_DIR
+npm run dev                  # http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Documents live in [`howto/`](howto/) in this repo. Add them there in any folder structure and commit them with the code.
+  `HOWTO_DIR` in `.env.local` can point somewhere else if needed.
+- Supported: `.md`, `.markdown`, `.txt`, `.pdf`.
+  Other files (e.g. `.pages`) are skipped and listed in the ingest output.
+- Re-run `npm run ingest` whenever the documents change. It rebuilds the table from scratch.
+- `npm run search -- "din fråga"` shows which chunks a question retrieves (no LLM call).
 
-## Learn More
+## Files
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `scripts/ingest.mts`: walks the folder, extracts text (PDF via unpdf), chunks, embeds, writes LanceDB
+- `lib/chunk.ts`: markdown is split by heading, long sections into ~1500-char windows
+- `lib/embed.ts`: embeddings via Ollama (`bge-m3`). After changing the embedding model, re-run `npm run ingest`
+- `lib/store.ts`: LanceDB read/write
+- `app/api/chat/route.ts`: retrieval + Ollama streaming (NDJSON: `sources`, `text`, `error` events)
+- `app/page.tsx`: chat UI
